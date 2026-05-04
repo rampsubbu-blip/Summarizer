@@ -179,7 +179,6 @@
     .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
     .btn-fetch { background: var(--card); color: var(--text); border: 1px solid var(--border); }
     .btn-sum { background: var(--accent); color: #000; }
-    .btn-tg { background: rgba(0,136,204,0.18); color: #29a9e0; border: 1px solid rgba(0,136,204,0.28); }
 
     /* SPINNER */
     .spin { width: 13px; height: 13px; border: 2px solid rgba(255,255,255,0.2); border-top-color: currentColor; border-radius: 50%; animation: rot .7s linear infinite; display: none; }
@@ -289,9 +288,7 @@
     <button class="btn btn-sum" id="btn-sum" onclick="summarize()">
       <div class="spin"></div><span>🤖 Summarize</span>
     </button>
-    <button class="btn btn-tg" id="btn-tg" onclick="sendTelegram()">
-      <div class="spin"></div><span>✈️ Send</span>
-    </button>
+
   </div>
 
 </div>
@@ -308,8 +305,7 @@
     <div class="p-lbl">🔑 API Keys</div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <input class="inp" type="password" id="k-groq" placeholder="Groq API Key (gsk_...)" oninput="savePrefs()">
-      <input class="inp" type="password" id="k-tgtoken" placeholder="Telegram Bot Token" oninput="savePrefs()">
-      <input class="inp" type="text" id="k-tgchat" placeholder="Telegram Chat ID" oninput="savePrefs()">
+      <div style="font-size:10.5px;color:var(--text2);margin-top:-4px;padding-left:2px">Get free key → <a href="https://console.groq.com" target="_blank" style="color:var(--accent)">console.groq.com</a></div>
     </div>
   </div>
 
@@ -397,7 +393,7 @@ let P = {
   watchlist: [], sectors: [],
   topics: { breaking:true, economy:true, geo:true, markets:false, corpAll:false },
   sources: { et:true, bs:true, bl:true },
-  groqKey:'', tgToken:'', tgChat:''
+  groqKey:''
 };
 
 // ── INIT ───────────────────────────────────────────────────────────
@@ -520,7 +516,18 @@ function getTab(tab) {
 // ── GROQ AI ────────────────────────────────────────────────────────
 
 async function summarize() {
-  if(!P.groqKey){ toast('⚠️ Add Groq API key in Settings'); return; }
+  if(!P.groqKey){
+    openSettings();
+    setTimeout(()=>{
+      const el=document.getElementById('k-groq');
+      el.scrollIntoView({behavior:'smooth',block:'center'});
+      el.focus();
+      el.style.borderColor='rgba(240,165,0,0.8)';
+      setTimeout(()=>el.style.borderColor='',2000);
+    }, 320);
+    toast('👆 Enter your Groq API key here');
+    return;
+  }
   const btn = document.getElementById('btn-sum');
   setLoad(btn,true); setStatus('busy','Summarizing with Groq…');
 
@@ -562,39 +569,6 @@ Summary:`;
   }
 
   setLoad(btn,false); renderFeed();
-}
-
-// ── TELEGRAM ──────────────────────────────────────────────────────
-
-async function sendTelegram() {
-  if(!P.tgToken||!P.tgChat){ toast('⚠️ Add Telegram credentials in Settings'); return; }
-  if(!Object.keys(summaries).length){ toast('⚠️ Generate summaries first!'); return; }
-
-  const btn = document.getElementById('btn-tg');
-  setLoad(btn,true);
-  const d = new Date();
-  const dateStr = d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-  const timeStr = d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-  const emojis = {all:'📋',breaking:'🚨',economy:'📊',geo:'🌍',corporate:'🏢',markets:'📈'};
-
-  let msg = `*MC Summarizer PWA* — ${dateStr} ${timeStr}\n\n`;
-  for(const tab of ['breaking','economy','geo','corporate','markets','all']) {
-    if(summaries[tab]) msg += `${emojis[tab]||'•'} *${tab.toUpperCase()}*\n${summaries[tab].text}\n\n`;
-  }
-  msg += `_Powered by Groq + Claude — Rama Prakash S_`;
-
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${P.tgToken}/sendMessage`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({chat_id:P.tgChat, text:msg, parse_mode:'Markdown'})
-    });
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    toast('✈️ Sent to Telegram!');
-  } catch(e) {
-    toast('❌ Telegram error: '+e.message.slice(0,40));
-  }
-  setLoad(btn,false);
 }
 
 // ── RENDER ────────────────────────────────────────────────────────
@@ -664,9 +638,7 @@ function switchTab(t){
 // ── SETTINGS ──────────────────────────────────────────────────────
 
 function renderSettings(){
-  document.getElementById('k-groq').value    = P.groqKey||'';
-  document.getElementById('k-tgtoken').value = P.tgToken||'';
-  document.getElementById('k-tgchat').value  = P.tgChat||'';
+  document.getElementById('k-groq').value = P.groqKey||'';
   renderChips();
 
   document.getElementById('sector-grid').innerHTML = Object.keys(SECTOR_KW).map(s=>`
@@ -713,8 +685,6 @@ function togSource(k,el){ P.sources[k]=!P.sources[k]; el.classList.toggle('on',P
 
 function savePrefs(){
   P.groqKey  = document.getElementById('k-groq').value;
-  P.tgToken  = document.getElementById('k-tgtoken').value;
-  P.tgChat   = document.getElementById('k-tgchat').value;
   try { localStorage.setItem('mcp',JSON.stringify(P)); } catch(e){}
 }
 
