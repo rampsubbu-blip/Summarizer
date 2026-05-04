@@ -343,7 +343,7 @@
 <script>
 // ── CONSTANTS ──────────────────────────────────────────────────────
 
-const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
+const RSS2JSON = 'https://api.rss2json.com/v1/api.json?count=50&rss_url=';
 const PROXIES = [
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -420,38 +420,48 @@ function init() {
 
 async function fetchAllFeeds() {
   const btn = document.getElementById('btn-fetch');
-  setLoad(btn, true); setStatus('busy','Fetching RSS feeds…');
+  setLoad(btn, true);
 
   const enabled = [];
   if(P.sources.et) enabled.push(...FEEDS.et);
   if(P.sources.bs) enabled.push(...FEEDS.bs);
   if(P.sources.bl) enabled.push(...FEEDS.bl);
 
-  let newCount = 0, failCount = 0;
-  const results = await Promise.allSettled(enabled.map(f => fetchFeed(f)));
+  let newCount = 0, failCount = 0, done = 0;
 
-  for(const r of results) {
-    if(r.status==='fulfilled' && r.value) {
-      for(const item of r.value) {
-        if(!seen.has(item.url)){ seen.add(item.url); articles.unshift(item); newCount++; }
+  // Fetch sequentially with a small gap — avoids rss2json rate limiting
+  for (const feed of enabled) {
+    setStatus('busy', `Fetching ${feed.name}… (${done+1}/${enabled.length})`);
+    try {
+      const items = await fetchFeed(feed);
+      for (const item of items) {
+        if (!seen.has(item.url)) { seen.add(item.url); articles.unshift(item); newCount++; }
       }
-    } else {
+    } catch(e) {
       failCount++;
     }
+    done++;
+    // Render progress live after each feed
+    renderFeed(); updateBadges();
+    document.getElementById('cnt-items').textContent = articles.length + ' items';
+    // Small pause between feeds so rss2json doesn't throttle
+    if (done < enabled.length) await sleep(400);
   }
 
-  articles = articles.slice(0,250);
+  articles = articles.slice(0, 300);
   reMatch();
   try { localStorage.setItem('mca', JSON.stringify(articles)); } catch(e){}
 
   const t = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-  setStatus('ok', 'Fetched ' + t);
+  setStatus(failCount === enabled.length ? 'err' : 'ok', 'Fetched ' + t);
   document.getElementById('hdr-sub').textContent = 'Fetched ' + t;
   document.getElementById('cnt-items').textContent = articles.length + ' items';
   toast('✅ ' + newCount + ' new articles' + (failCount ? ` · ⚠️ ${failCount} feeds failed` : ''));
   setLoad(btn, false);
   renderFeed(); updateBadges();
 }
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fetchWithTimeout(url, ms=15000) {
   const ctrl = new AbortController();
@@ -495,9 +505,7 @@ async function fetchFeed(feed) {
 
 // Parse rss2json JSON response
 function parseJSON(items, src) {
-  const cutoff = Date.now() - 24*60*60*1000;
-  const source = src.startsWith('ET')?'et': src.startsWith('BS')?'bs':'bl';
-  return items.map(item => {
+  const cutoff = Date.now() - 48*60*60*1000;
     const title = (item.title||'').trim();
     const desc  = (item.description||item.content||'').replace(/<[^>]+>/g,'').trim();
     const url   = item.link||item.guid||'';
@@ -512,10 +520,7 @@ function parseJSON(items, src) {
 function parseRSS(xml, src) {
   const doc = new DOMParser().parseFromString(xml, 'text/xml');
   const items = Array.from(doc.querySelectorAll('item'));
-  const cutoff = Date.now() - 24*60*60*1000;
-  const source = src.startsWith('ET')?'et': src.startsWith('BS')?'bs':'bl';
-
-  return items.map(el => {
+  const cutoff = Date.now() - 48*60*60*1000;
     const title = el.querySelector('title')?.textContent?.trim()||'';
     const desc  = (el.querySelector('description')?.textContent||'').replace(/<[^>]+>/g,'').trim();
     const url   = (el.querySelector('link')?.textContent||el.querySelector('guid')?.textContent||'').trim();
