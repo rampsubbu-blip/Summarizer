@@ -258,6 +258,9 @@
     <span id="cnt-sum">0 summaries</span>
   </div>
 
+  <!-- DEBUG LOG -->
+  <div id="dbg" style="display:none;padding:6px 14px;background:#0a0a18;border-bottom:1px solid var(--border);font-size:10px;font-family:monospace;color:var(--text2);max-height:80px;overflow-y:auto;flex-shrink:0;"></div>
+
   <!-- TABS -->
   <div class="tabs">
     <div class="tab on" data-t="all" onclick="switchTab('all')">All <span class="tbadge" id="b-all">0</span></div>
@@ -345,9 +348,11 @@
 
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?count=50&rss_url=';
 const PROXIES = [
+  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`
 ];
 
 const FEEDS = {
@@ -421,6 +426,8 @@ function init() {
 async function fetchAllFeeds() {
   const btn = document.getElementById('btn-fetch');
   setLoad(btn, true);
+  const dbgEl = document.getElementById('dbg');
+  dbgEl.innerHTML = ''; dbgEl.style.display = 'none';
 
   const enabled = [];
   if(P.sources.et) enabled.push(...FEEDS.et);
@@ -483,33 +490,47 @@ async function fetchWithTimeout(url, ms=15000) {
   }
 }
 
+function dbgLog(msg) {
+  const el = document.getElementById('dbg');
+  el.style.display = 'block';
+  el.innerHTML += msg + '<br>';
+  el.scrollTop = el.scrollHeight;
+}
+
 async function fetchFeed(feed) {
-  // Strategy 1: rss2json.com — handles CORS natively, best for mobile
+  // Strategy 1: rss2json
   try {
     const res = await fetchWithTimeout(RSS2JSON + encodeURIComponent(feed.url), 15000);
     if (res.ok) {
       const data = await res.json();
-      // Accept items even if status is not 'ok' (rss2json sometimes returns partial data)
       if (data.items?.length) {
         const parsed = parseJSON(data.items, feed.name);
-        if (parsed.length) return parsed;
+        if (parsed.length) { dbgLog(`✅ ${feed.name}: ${parsed.length} via rss2json`); return parsed; }
       }
+      dbgLog(`⚠️ ${feed.name}: rss2json 0 items (status:${data.status})`);
     }
-  } catch(e) { /* fall through */ }
+  } catch(e) { dbgLog(`⚠️ ${feed.name}: rss2json err - ${e.message.slice(0,30)}`); }
 
-  // Strategy 2: Raw XML via CORS proxies
-  for (const proxy of PROXIES) {
+  // Strategy 2: CORS proxies
+  for (let i = 0; i < PROXIES.length; i++) {
     try {
-      const res = await fetchWithTimeout(proxy(feed.url), 15000);
+      const proxyUrl = PROXIES[i](feed.url);
+      const res = await fetchWithTimeout(proxyUrl, 15000);
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      const txt = await res.text();
+      let txt = await res.text();
+      // allorigins /get returns JSON with contents field
+      if (txt.startsWith('{') && txt.includes('"contents"')) {
+        txt = JSON.parse(txt).contents || '';
+      }
       if (!txt || txt.length < 200) throw new Error('Empty');
       const items = parseRSS(txt, feed.name);
-      if (items.length) return items;
-    } catch(e) { /* try next */ }
+      if (items.length) { dbgLog(`✅ ${feed.name}: ${items.length} via proxy${i+1}`); return items; }
+      throw new Error('0 items after parse');
+    } catch(e) { dbgLog(`⚠️ ${feed.name}: proxy${i+1} - ${e.message.slice(0,25)}`); }
   }
 
-  throw new Error('All strategies failed for ' + feed.name);
+  dbgLog(`❌ ${feed.name}: ALL failed`);
+  throw new Error('All failed: ' + feed.name);
 }
 
 // Parse rss2json JSON response
