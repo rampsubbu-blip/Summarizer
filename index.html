@@ -343,7 +343,11 @@
 <script>
 // ── CONSTANTS ──────────────────────────────────────────────────────
 
-const PROXY = 'https://api.allorigins.win/raw?url=';
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+];
 
 const FEEDS = {
   et: [
@@ -422,7 +426,7 @@ async function fetchAllFeeds() {
   if(P.sources.bs) enabled.push(...FEEDS.bs);
   if(P.sources.bl) enabled.push(...FEEDS.bl);
 
-  let newCount = 0;
+  let newCount = 0, failCount = 0;
   const results = await Promise.allSettled(enabled.map(f => fetchFeed(f)));
 
   for(const r of results) {
@@ -430,6 +434,8 @@ async function fetchAllFeeds() {
       for(const item of r.value) {
         if(!seen.has(item.url)){ seen.add(item.url); articles.unshift(item); newCount++; }
       }
+    } else {
+      failCount++;
     }
   }
 
@@ -441,17 +447,38 @@ async function fetchAllFeeds() {
   setStatus('ok', 'Fetched ' + t);
   document.getElementById('hdr-sub').textContent = 'Fetched ' + t;
   document.getElementById('cnt-items').textContent = articles.length + ' items';
-  toast('✅ ' + newCount + ' new articles');
+  toast('✅ ' + newCount + ' new articles' + (failCount ? ` · ⚠️ ${failCount} feeds failed` : ''));
   setLoad(btn, false);
   renderFeed(); updateBadges();
 }
 
+async function fetchWithTimeout(url, ms=14000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    return res;
+  } catch(e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
 async function fetchFeed(feed) {
-  const url = PROXY + encodeURIComponent(feed.url);
-  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-  if(!res.ok) throw new Error(res.status);
-  const txt = await res.text();
-  return parseRSS(txt, feed.name);
+  let lastErr;
+  for (const proxy of PROXIES) {
+    try {
+      const res = await fetchWithTimeout(proxy(feed.url), 14000);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const txt = await res.text();
+      if (!txt || txt.length < 100) throw new Error('Empty response');
+      return parseRSS(txt, feed.name);
+    } catch(e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 function parseRSS(xml, src) {
