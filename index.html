@@ -427,36 +427,43 @@ async function fetchAllFeeds() {
   if(P.sources.bs) enabled.push(...FEEDS.bs);
   if(P.sources.bl) enabled.push(...FEEDS.bl);
 
-  let newCount = 0, failCount = 0, done = 0;
+  let fresh = [], failCount = 0, done = 0;
 
-  // Fetch sequentially with a small gap — avoids rss2json rate limiting
   for (const feed of enabled) {
     setStatus('busy', `Fetching ${feed.name}… (${done+1}/${enabled.length})`);
     try {
       const items = await fetchFeed(feed);
-      for (const item of items) {
-        if (!seen.has(item.url)) { seen.add(item.url); articles.unshift(item); newCount++; }
-      }
+      fresh.push(...items);
+      document.getElementById('cnt-items').textContent = fresh.length + ' items';
     } catch(e) {
       failCount++;
     }
     done++;
-    // Render progress live after each feed
     renderFeed(); updateBadges();
-    document.getElementById('cnt-items').textContent = articles.length + ' items';
-    // Small pause between feeds so rss2json doesn't throttle
     if (done < enabled.length) await sleep(1200);
   }
 
-  articles = articles.slice(0, 300);
+  // Deduplicate by URL, merge with existing, sort newest first
+  const byUrl = new Map();
+  // Existing articles first (lower priority)
+  for (const a of articles) if(a.url) byUrl.set(a.url, a);
+  // Fresh articles override
+  for (const a of fresh) if(a.url) byUrl.set(a.url, a);
+
+  articles = Array.from(byUrl.values())
+    .sort((a,b) => new Date(b.pub) - new Date(a.pub))
+    .slice(0, 300);
+
+  seen = new Set(articles.map(a => a.url));
   reMatch();
+
   try { localStorage.setItem('mca', JSON.stringify(articles)); } catch(e){}
 
   const t = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   setStatus(failCount === enabled.length ? 'err' : 'ok', 'Fetched ' + t);
   document.getElementById('hdr-sub').textContent = 'Fetched ' + t;
   document.getElementById('cnt-items').textContent = articles.length + ' items';
-  toast('✅ ' + articles.length + ' articles loaded' + (newCount ? ` (${newCount} new)` : '') + (failCount ? ` · ⚠️ ${failCount} feeds failed` : ''));
+  toast('✅ ' + articles.length + ' articles' + (failCount ? ` · ⚠️ ${failCount} feeds failed` : ''));
   setLoad(btn, false);
   renderFeed(); updateBadges();
 }
