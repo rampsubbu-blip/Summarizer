@@ -456,7 +456,7 @@ async function fetchAllFeeds() {
   setStatus(failCount === enabled.length ? 'err' : 'ok', 'Fetched ' + t);
   document.getElementById('hdr-sub').textContent = 'Fetched ' + t;
   document.getElementById('cnt-items').textContent = articles.length + ' items';
-  toast('✅ ' + newCount + ' new articles' + (failCount ? ` · ⚠️ ${failCount} feeds failed` : ''));
+  toast('✅ ' + articles.length + ' articles loaded' + (newCount ? ` (${newCount} new)` : '') + (failCount ? ` · ⚠️ ${failCount} feeds failed` : ''));
   setLoad(btn, false);
   renderFeed(); updateBadges();
 }
@@ -567,7 +567,7 @@ function reMatch() {
 
 function getTab(tab) {
   switch(tab) {
-    case 'all':       return articles.filter(a => P.topics.corpAll || a.cats.some(c=>c!=='general') || a.wl.length || a.sectors.length);
+    case 'all':       return articles; // show all fetched articles
     case 'corporate': return articles.filter(a => a.wl.length>0 || a.sectors.length>0);
     case 'breaking':  return P.topics.breaking ? articles.filter(a=>a.cats.includes('breaking')) : [];
     case 'economy':   return P.topics.economy  ? articles.filter(a=>a.cats.includes('economy'))  : [];
